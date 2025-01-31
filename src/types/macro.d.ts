@@ -1,19 +1,14 @@
-// import { PPJSON } from "./PostNamazu";
-
-export type MacroType = "macro" | "place";
+import type { PPJSON } from './PostNamazu'
 
 interface Macro {
-  Name: string;
-  Type: MacroType;
-  Editable?: boolean;
-  Deletability: boolean;
+  Name: string
+  Editable?: boolean
+  Deletability?: boolean
 }
 export interface MacroInfoMacro extends Macro {
-  Type: "macro";
-  Text: string;
+  Text: string
 }
 export interface MacroInfoPlace extends Macro {
-  Type: "place";
-  Place: PPJSON;
+  Place: PPJSON
 }
-export type ZoneIdInfo = Record<string, (MacroInfoMacro | MacroInfoPlace)[]>;
+export type ZoneIdInfo = Record<string, (MacroInfoMacro | MacroInfoPlace)[]>

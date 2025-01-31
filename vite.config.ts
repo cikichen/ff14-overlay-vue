@@ -1,66 +1,78 @@
-import { defineConfig } from "vite";
-import vue from "@vitejs/plugin-vue";
-import Markdown from "vite-plugin-md";
-import { presetAttributify, presetIcons, presetUno } from "unocss";
-import Unocss from "unocss/vite";
-import viteCompression from "vite-plugin-compression";
-import Pages from "vite-plugin-pages";
-import AutoImport from "unplugin-auto-import/vite";
-import Components from "unplugin-vue-components/vite";
-import { ElementPlusResolver } from "unplugin-vue-components/resolvers";
-import { resolve } from "path";
-import vueJsx from "@vitejs/plugin-vue-jsx";
-import { createStyleImportPlugin, VxeTableResolve } from "vite-plugin-style-import";
-// const path = require("path");
+import path from 'node:path'
+import vue from '@vitejs/plugin-vue'
+import jsx from '@vitejs/plugin-vue-jsx'
+import { presetAttributify, presetIcons, presetUno } from 'unocss'
+import Unocss from 'unocss/vite'
+import AutoImport from 'unplugin-auto-import/vite'
+import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
+import Components from 'unplugin-vue-components/vite'
+import { defineConfig } from 'vite'
+import viteCompression from 'vite-plugin-compression'
+import Markdown from 'vite-plugin-md'
+import Pages from 'vite-plugin-pages'
+import sassDts from 'vite-plugin-sass-dts'
+import {
+  createStyleImportPlugin,
+  VxeTableResolve,
+} from 'vite-plugin-style-import'
 
 // https://vitejs.dev/config/
 export default defineConfig({
-  base: "/ff14-overlay-vue/",
+  base: '/ff14-overlay-vue/',
   build: {
-    outDir: "./dist",
-    emptyOutDir: true, //构建时清空outDir目录
+    outDir: './dist',
+    // emptyOutDir: true, // 构建时清空outDir目录
+    minify: 'terser',
+    terserOptions: {
+      compress: {
+        drop_console: true,
+        drop_debugger: true,
+      },
+    },
     rollupOptions: {
       output: {
-        chunkFileNames: "assets/js/[name].js",
-        entryFileNames: "assets/js/[name].js",
-        assetFileNames: "assets/[ext]/[name].[ext]",
+        manualChunks: {
+          'vue-vendor': ['vue', 'vue-router', 'pinia', 'vue-i18n'],
+          'element-plus': ['element-plus'],
+          'obs': ['obs-websocket-js'],
+          'utils': ['moment', 'axios', 'lodash'],
+        },
+        chunkFileNames: 'assets/js/[name]-[hash].js',
+        entryFileNames: 'assets/js/[name]-[hash].js',
+        assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
       },
     },
     chunkSizeWarningLimit: 2000,
-    // minify: "terser",
-    // terserOptions: {
-    // compress: {
-    // drop_console: true,
-    // drop_debugger: true,
-    // },
-    // },
+    reportCompressedSize: false,
+    sourcemap: false,
   },
   plugins: [
     vue({
-      include: [/\.vue$/, /\.md$/], // <--
+      include: [/\.vue$/, /\.md$/],
     }),
-    vueJsx({}),
+    jsx(),
     Markdown(),
-    AutoImport({
-      imports: ["vue", "@vueuse/core"],
-      dts: "src/types/auto-imports.d.ts",
-      resolvers: [ElementPlusResolver()],
-    }),
     Components({
-      extensions: ["vue", "md"],
-      directoryAsNamespace: true,
-      include: [/\.vue$/, /\.vue\?vue/, /\.md$/],
       resolvers: [ElementPlusResolver()],
-      dts: "src/types/components.d.ts",
+      deep: true,
+      dts: './src/types/components.d.ts',
+      directoryAsNamespace: true,
+    }),
+    AutoImport({
+      imports: ['vue', '@vueuse/core'],
+      dts: './src/types/auto-imports.d.ts',
+      resolvers: [ElementPlusResolver()],
+      eslintrc: {
+        enabled: true,
+        filepath: './.eslintrc-auto-import.json',
+        globalsPropValue: true,
+      },
     }),
     viteCompression({
-      verbose: false,
-      filter: /\.(js|mjs|json|css)$/,
-      disable: false,
-      threshold: 1025,
-      algorithm: "gzip",
-      ext: ".gz",
-      // deleteOriginFile: true,
+      algorithm: 'gzip',
+      ext: '.gz',
+      threshold: 1024,
+      deleteOriginFile: false,
     }),
     Unocss({
       presets: [presetUno(), presetAttributify(), presetIcons()],
@@ -69,13 +81,39 @@ export default defineConfig({
     createStyleImportPlugin({
       resolves: [VxeTableResolve()],
     }),
+    sassDts(),
   ],
   define: {
     __VUE_OPTIONS_API__: false,
   },
   resolve: {
     alias: {
-      "@": resolve(__dirname, "./src"),
+      '@': path.resolve(__dirname, './src'),
     },
   },
-});
+  server: {
+    host: true,
+    port: 3000,
+    open: true,
+    cors: true,
+    strictPort: false,
+    hmr: {
+      overlay: false,
+    },
+  },
+  preview: {
+    port: 5000,
+    open: true,
+    cors: true,
+  },
+  optimizeDeps: {
+    include: [
+      'vue',
+      'vue-router',
+      'pinia',
+      'element-plus',
+      '@vueuse/core',
+      'axios',
+    ],
+  },
+})

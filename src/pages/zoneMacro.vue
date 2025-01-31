@@ -1,186 +1,250 @@
 <script setup lang="ts">
-import actWS from "@/assets/actWS.png";
-import { Check, Delete, Edit, Position, CopyDocument, ChatDotSquare, ChatSquare } from "@element-plus/icons-vue";
-import { defaultMacro } from "@/resources/macro";
-import zoneInfo from "@/resources/zoneInfo";
-import { useMacroStore } from "@/store/macro";
-import "github-markdown-css/github-markdown-light.css";
-import README from "@/common/markdown/zoneMacro.md";
-import { ElMessage, ElMessageBox } from "element-plus";
-const [help, toggleHelp] = useToggle(false);
-const macroStore = useMacroStore();
-macroStore.formatAllWaymarkPlaceData();
-{
-  //兼容旧数据的更新策略 日后删除
-  for (const macros in macroStore.data.zoneId) {
-    for (const key in macroStore.data.zoneId[macros]) {
-      const item = macroStore.data.zoneId[macros][key];
-      // @ts-ignore
-      if (item.name) item.Name = item.name;
-      // @ts-ignore
-      if (item.type) item.Type = item.type;
-      // @ts-ignore
-      if (item.text) item.Text = item.text;
-      // @ts-ignore
-      if (item.place) item.Place = item.place;
-      Reflect.deleteProperty(item, "name");
-      Reflect.deleteProperty(item, "type");
-      Reflect.deleteProperty(item, "text");
-      Reflect.deleteProperty(item, "place");
-      if (item.Type === "place") {
-        Reflect.deleteProperty(item.Place, "MapID");
-        Reflect.deleteProperty(item.Place, "Name");
-        if (item.Place instanceof Array) {
-          const res = {
-            A: item.Place.find((v) => v.Mark === "A"),
-            B: item.Place.find((v) => v.Mark === "B"),
-            C: item.Place.find((v) => v.Mark === "C"),
-            D: item.Place.find((v) => v.Mark === "D"),
-            One: item.Place.find((v) => v.Mark === "One"),
-            Two: item.Place.find((v) => v.Mark === "Two"),
-            Three: item.Place.find((v) => v.Mark === "Three"),
-            Four: item.Place.find((v) => v.Mark === "Four"),
-          };
-          // @ts-ignore
-          for (const k in res) Reflect.deleteProperty(res[k], "Mark");
-          item.Place = res;
-        }
-      }
-    }
-  }
-}
-const markMap = {
-  A: "A",
-  B: "B",
-  C: "C",
-  D: "D",
-  One: "1",
-  Two: "2",
-  Three: "3",
-  Four: "4",
-};
-const markViewSize = 180;
-const markViewScale = 3;
-const markViewFontSize = 19;
-const raidEmulatorOnLoad = async () => {
-  let websocketConnected = false;
-  if (window.location.href.indexOf("OVERLAY_WS") > 0) {
-    websocketConnected = await Promise.race<Promise<boolean>>([
-      new Promise<boolean>((res) => {
-        void callOverlayHandler({ call: "cactbotRequestState" }).then(() => {
-          res(true);
-        });
-      }),
-      new Promise<boolean>((res) => {
-        window.setTimeout(() => {
-          res(false);
-        }, 1000);
-      }),
-    ]);
-    if (!websocketConnected) {
-      ElMessageBox.alert(`请先启动ACT，再打开此页面<img src='${actWS}' style='width:100%'>`, "未检测到ACT连接", {
-        confirmButtonText: "确定",
-        dangerouslyUseHTMLString: true,
-      });
-    }
-  }
-};
+import { defaultMacro } from '@/resources/macro'
+import zoneInfo from '@/resources/zoneInfo'
+import { useMacroStore } from '@/store/macro'
+import { useWebSocket } from '@/utils/useWebSocket'
+import {
+  ChatDotSquare,
+  ChatSquare,
+  Check,
+  CopyDocument,
+  Delete,
+  Edit,
+  Position,
+} from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import ContentType from '../../cactbot/resources/content_type'
+import { addOverlayListener } from '../../cactbot/resources/overlay_plugin_api'
+import 'github-markdown-css/github-markdown-light.css'
+
+const macroStore = useMacroStore()
+const hideOnStartup = useStorage('zoneMacroHideOnStartup', ref(false))
+if (hideOnStartup.value)
+  macroStore.show = false
+macroStore.formatAllWaymarkPlaceData()
+
+const showContentTypes: number[] = [
+  ContentType.Dungeons, // 4人迷宫
+  ContentType.Trials, // 讨伐战
+  ContentType.Raids, // 大型Raid
+  ContentType.VCDungeonFinder, // 多变迷宫
+  ContentType.UltimateRaids, // 绝境战
+]
+
+const preSortZoneInfo = Object.entries(zoneInfo).map(([id, info]) => {
+  return { id, ...info }
+}).sort((a, b) => {
+  if (a.exVersion !== b.exVersion)
+    return a.exVersion - b.exVersion
+  if (a.contentType === ContentType.Raids && b.contentType === ContentType.Raids && b.name.ja && a.name.ja)
+    return a.name.ja.localeCompare(b.name.ja)
+  return Number(a.id) - Number(b.id)
+})
+
+const usedZoneInfo = [
+  ...preSortZoneInfo.filter(v => v.contentType === ContentType.Dungeons), // 4人迷宫
+  ...preSortZoneInfo.filter(v => v.contentType === ContentType.Trials), // 讨伐战
+  ...preSortZoneInfo.filter(v => v.contentType === ContentType.Raids), // 大型Raid
+  ...preSortZoneInfo.filter(v => v.contentType === ContentType.VCDungeonFinder), // 多变迷宫
+  ...preSortZoneInfo.filter(v => v.contentType === ContentType.UltimateRaids), // 绝境战
+  ...preSortZoneInfo.filter(v => v.contentType === ContentType.DeepDungeons), // 深层迷宫
+  ...preSortZoneInfo.filter(v => v.contentType === undefined || !showContentTypes.includes(v.contentType)),
+]
+
+const { useType } = useWebSocket({ allowClose: true, addWsParam: false })
 
 onMounted(() => {
-  // addOverlayListener("onGameExistsEvent", macroStore.handleGameExists);
-  addOverlayListener("ChangeZone", macroStore.handleChangeZone);
-  addOverlayListener("LogLine", macroStore.handleLogLine);
-  startOverlayEvents();
+  addOverlayListener('ChangeZone', macroStore.handleChangeZone)
+  addOverlayListener('LogLine', macroStore.handleLogLine)
   watchEffect(() => {
     if (
-      (macroStore.data.zoneId[macroStore.selectZone] === undefined || macroStore.data.zoneId[macroStore.selectZone]?.length === 0) &&
-      defaultMacro.zoneId[macroStore.selectZone]
+      (macroStore.data.zoneId[macroStore.selectZone] === undefined
+        || macroStore.data.zoneId[macroStore.selectZone]?.length === 0)
+      && defaultMacro.zoneId[macroStore.selectZone]
     ) {
-      ElMessage.success("用户数据为空，加载默认数据");
-      macroStore.data.zoneId[macroStore.selectZone] = defaultMacro.zoneId[macroStore.selectZone];
+      ElMessage.success('用户数据为空，加载默认数据')
+      macroStore.data.zoneId[macroStore.selectZone]
+        = defaultMacro.zoneId[macroStore.selectZone]
     }
-  });
+  })
   watch(
-    toRef(macroStore, "selectZone"),
+    toRef(macroStore, 'selectZone'),
     () => {
-      macroStore.formatSelectZoneWaymarkPlaceData(macroStore.selectZone);
+      macroStore.formatSelectZoneWaymarkPlaceData(macroStore.selectZone)
     },
     { immediate: true },
-  );
-  raidEmulatorOnLoad();
-  macroStore.updateZone();
-});
-onBeforeUnmount(() => {
-  // removeOverlayListener("onGameExistsEvent", macroStore.handleGameExists);
-  removeOverlayListener("ChangeZone", macroStore.handleChangeZone);
-  removeOverlayListener("LogLine", macroStore.handleLogLine);
-});
+  )
+  macroStore.updateZone()
+})
 </script>
+
 <template>
   <i
+    v-show="!macroStore.show"
     class="vxe-icon-search-zoom-in"
     style="position: fixed; top: 0; right: 0; color: white; cursor: pointer"
-    v-show="!macroStore.show"
     @click="macroStore.toggleShow()"
-  ></i>
-  <el-container rd-1 m-0 p-0 absolute left-0 top-0 v-show="macroStore.show" class="elcontainer">
-    <el-header flex="~ wrap gap1" height="auto" p-l-1 class="elheader">
+  />
+  <el-container
+
+    v-show="macroStore.show"
+    p-0 top-0 m-0 absolute left-0 rd-1
+    class="elcontainer"
+  >
+    <el-header flex="~ wrap gap1" height="auto" class="elheader">
       <el-space>
-        <el-button type="primary" size="small" :icon="Position" @click="macroStore.positioning()">当前</el-button>
-        <el-select size="small" style="max-width: 12rem; min-width: 6rem" m-3px v-model="macroStore.selectZone" filterable placeholder="Select">
-          <el-option v-for="(item, i) in zoneInfo" :key="i" :label="item.name?.cn ?? `${item.name.en} / ${item.name.ja}`" :value="i" />
+        <el-button
+          type="primary"
+          size="small"
+          :icon="Position"
+          @click="macroStore.positioning()"
+        >
+          当前
+        </el-button>
+        <el-select
+          v-model="macroStore.selectZone"
+          size="small"
+
+          style="width: 10rem"
+          filterable m-3px
+          placeholder="Select"
+        >
+          <el-option
+            v-for="(item) in usedZoneInfo.filter(v => (!v.name.en.startsWith('(') && v.contentType && showContentTypes.includes(v.contentType)) || macroStore.selectZone === v.id)"
+            :key="item.id"
+            :label="`${item.name?.cn ?? `${item.name.en} / ${item.name.ja}`}`"
+            :value="item.id"
+          />
         </el-select>
       </el-space>
       <el-space class="fastEntrance">
         <el-button-group flex="~ ! wrap">
           <el-button
-            plain
-            bg
-            color="rgb(24,34,44)"
-            size="small"
             v-for="(entrance, index) in macroStore.fastEntrance"
             :key="index"
+
+            bg plain
+            color="rgb(24,34,44)"
+            size="small"
             @click="macroStore.selectZone = entrance.value"
-            >{{ entrance.text }}</el-button
           >
+            {{ entrance.text }}
+          </el-button>
         </el-button-group>
       </el-space>
     </el-header>
-    <el-main p-1 m-0>
-      <el-space v-show="!help" wrap alignment="flex-start" style="font-size: 12px">
-        <el-card shadow="hover" v-for="(macro, index) in macroStore.data.zoneId[macroStore.selectZone]" :key="index" class="main-box-card">
-          <p m-t-2 m-b-2 v-show="!macro.Editable" v-html="macro.Name" font-bold></p>
-          <el-input size="small" v-show="macro.Editable" v-model="macro.Name" placeholder="宏标题" />
-          <div v-if="macro.Type === 'macro'">
+    <el-main style="padding: 0.25rem;margin:0">
+      <el-space
+        wrap
+        alignment="flex-start"
+        style="font-size: 12px"
+      >
+        <el-card
+          v-for="(macro, index) in macroStore.data.zoneId[
+            macroStore.selectZone
+          ]"
+          :key="index"
+          shadow="hover"
+          class="main-box-card"
+        >
+          <p
+            v-show="!macro.Editable"
+
+            m-b-2 m-t-2 font-bold
+            v-html="macro.Name"
+          />
+          <el-input
+            v-show="macro.Editable"
+            v-model="macro.Name"
+            size="small"
+            placeholder="宏标题"
+          />
+          <div v-if="'Text' in macro">
             <article v-if="!macro.Editable">
-              <div v-for="(m, o) in macro.Text?.split('\n')" :key="o" class="macroText">{{ m }}</div>
+              <div
+                v-for="(m, o) in macro.Text?.split('\n')"
+                :key="o"
+                class="macroText"
+              >
+                {{ m }}
+              </div>
             </article>
             <el-input
-              size="small"
               v-show="macro.Editable"
               v-model="macro.Text"
+              size="small"
               :autosize="{ minRows: 3 }"
               type="textarea"
               placeholder="宏文本"
               wrap="off"
               style="width: 450px"
             />
-            <el-row v-if="!macro.Editable" class="buttonArea" :style="{ maxHeight: macro.Editable ? '100px' : null, opacity: macro.Editable ? 1 : null }">
-              <el-button :icon="Edit" size="small" @click="macroStore.editMacroMacro(macro)">编辑</el-button>
-              <el-button :icon="ChatSquare" size="small" type="info" @click="macroStore.sendMacroEcho(macro.Text)">默语</el-button>
-              <el-button :icon="ChatDotSquare" size="small" type="primary" @click="macroStore.sendMacroParty(macro.Text)">小队</el-button>
+            <el-row
+              v-if="!macro.Editable"
+              class="buttonArea"
+              :style="{
+                maxHeight: macro.Editable ? '100px' : null,
+                opacity: macro.Editable ? 1 : null,
+              }"
+            >
+              <el-button
+                v-if="macro.Deletability"
+                :icon="Edit"
+                size="small"
+                @click="macroStore.editMacroMacro(macro)"
+              />
+              <el-button
+                :icon="ChatSquare"
+                size="small"
+                type="info"
+                @click="macroStore.sendMacroEcho(macro.Text)"
+              >
+                默语
+              </el-button>
+              <el-button
+                :icon="ChatDotSquare"
+                size="small"
+                type="primary"
+                @click="macroStore.sendMacroParty(macro.Text)"
+              >
+                小队
+              </el-button>
             </el-row>
             <el-row v-if="macro.Editable" class="buttonAreaEditing">
-              <el-button type="success" size="small" :icon="Check" @click="macroStore.submitMacroMacro(macro)">完成</el-button>
-              <el-button v-if="macro.Deletability" type="danger" size="small" :icon="Delete" @click="macroStore.deleteMacro(macro)"> 删除</el-button></el-row
-            >
+              <el-button
+                type="success"
+                size="small"
+                :icon="Check"
+                @click="macroStore.submitMacroMacro(macro)"
+              >
+                完成
+              </el-button>
+              <el-button
+                v-if="macro.Deletability"
+                type="danger"
+                size="small"
+                :icon="Delete"
+                @click="macroStore.deleteMacro(macro)"
+              >
+                删除
+              </el-button>
+            </el-row>
           </div>
-          <div v-if="macro.Type === 'place'">
+          <div v-if="'Place' in macro">
             <el-space v-show="macro.Editable">
               <el-table :data="Object.entries(macro.Place)" border size="small">
-                <el-table-column align="center" v-if="macro.Editable" label="启用" width="50">
+                <el-table-column
+                  v-if="macro.Editable"
+                  align="center"
+                  label="启用"
+                  width="50"
+                >
                   <template #default="scope">
-                    <el-switch v-model="scope.row[1].Active" size="small" style="--el-switch-on-color: #13ce66" />
+                    <el-switch
+                      v-model="scope.row[1].Active"
+                      size="small"
+                      style="--el-switch-on-color: #13ce66"
+                    />
                   </template>
                 </el-table-column>
                 <el-table-column align="center" label="标记" width="50">
@@ -192,89 +256,153 @@ onBeforeUnmount(() => {
                   <template #default="scope">
                     <span v-show="!macro.Editable">{{ scope.row.X }}</span>
                     <el-input-number
-                      controls-position="right"
-                      :step="1"
-                      :precision="2"
-                      size="small"
                       v-show="macro.Editable"
                       v-model="scope.row[1].X"
-                    ></el-input-number>
+                      controls-position="right"
+                      :step="0.1"
+                      :precision="2"
+                      size="small"
+                    />
                   </template>
                 </el-table-column>
                 <el-table-column align="center" label="Z" width="140">
                   <template #default="scope">
                     <span v-show="!macro.Editable">{{ scope.row.Z }}</span>
                     <el-input-number
-                      controls-position="right"
-                      :step="1"
-                      :precision="2"
-                      size="small"
                       v-show="macro.Editable"
                       v-model="scope.row[1].Z"
-                    ></el-input-number>
+                      controls-position="right"
+                      :step="0.1"
+                      :precision="2"
+                      size="small"
+                    />
                   </template>
                 </el-table-column>
-                <el-table-column align="center" label="Y" width="85" v-if="false">
+                <el-table-column
+                  v-if="false"
+                  align="center"
+                  label="Y"
+                  width="85"
+                >
                   <template #default="scope">
                     <span v-show="!macro.Editable">{{ scope.row.Y }}</span>
-                    <el-input type="number" :precision="2" size="small" controls-position="right" v-show="macro.Editable" v-model="scope.row[1].Y"></el-input>
+                    <el-input
+                      v-show="macro.Editable"
+                      v-model="scope.row[1].Y"
+                      type="number"
+                      :precision="2"
+                      size="small"
+                      controls-position="right"
+                    />
                   </template>
                 </el-table-column>
               </el-table>
             </el-space>
             <el-space>
-              <div
-                style="position: relative; background-color: rgba(214, 199, 148, 1)"
-                :style="{ height: markViewSize + 'px', width: markViewSize + 'px', fontSize: markViewFontSize + 'px' }"
-              >
-                <div v-for="(mark, i) in ['A', 'B', 'C', 'D', 'One', 'Two', 'Three', 'Four']" :key="i">
-                  <span
-                    class="markIcon"
-                    :class="'markIcon' + mark"
-                    :style="{
-                      left: Math.min(markViewSize, Math.max(0, (Number(macro.Place[(mark as WayMarkKeys)]?.X) + macroStore.defaultX) * markViewScale + markViewSize / 2)) + 'px',
-                      top: Math.min(markViewSize, Math.max(0, (Number(macro.Place[mark as WayMarkKeys]?.Z) + macroStore.defaultY) * markViewScale + markViewSize / 2)) + 'px',
-                    }"
-                  >
-                    {{ macro.Place[mark as WayMarkKeys]?.Active ? markMap[mark as WayMarkKeys] ?? mark : "" }}
-                  </span>
-                </div>
-              </div>
+              <ZoneMacroMarksDiv :macro="macro" />
             </el-space>
-            <el-row v-if="!macro.Editable" class="buttonArea" :style="{ maxHeight: macro.Editable ? '100px' : null, opacity: macro.Editable ? 1 : null }">
-              <el-button :icon="Edit" size="small" @click="macroStore.editMacroPlace(macro)">编辑</el-button>
-              <el-button type="primary" size="small" @click="macroStore.doLocalWayMark(macro.Place)">本地</el-button>
-              <el-button type="primary" size="small" @click="macroStore.doSlotWayMark(macro.Place)">插槽</el-button>
+            <el-row
+              v-if="!macro.Editable"
+              class="buttonArea"
+              :style="{
+                maxHeight: macro.Editable ? '100px' : null,
+                opacity: macro.Editable ? 1 : null,
+              }"
+            >
+              <el-button
+                type="primary"
+                size="small"
+                @click="macroStore.doLocalWayMark(macro.Place)"
+              >
+                本地标
+              </el-button>
+              <el-button
+                type="primary"
+                size="small"
+                @click="macroStore.doPartyWayMark(macro.Place)"
+              >
+                公开标
+              </el-button>
+              <el-button
+                type="primary"
+                size="small"
+                @click="macroStore.doSlotWayMark(macro.Place)"
+              >
+                写插槽
+              </el-button>
+              <el-button
+                :icon="CopyDocument"
+                size="small"
+                class="export"
+                @click="macroStore.exportWaymarksJson(macro)"
+              />
+              <el-button
+                v-if="macro.Deletability"
+                :icon="Edit"
+                size="small"
+                @click="macroStore.editMacroPlace(macro)"
+              />
             </el-row>
             <el-row v-if="macro.Editable" class="buttonAreaEditing">
-              <el-button type="success" size="small" :icon="Check" @click="macroStore.submitMacroPlace(macro)">完成</el-button>
-              <el-button v-if="macro.Deletability" type="danger" size="small" :icon="Delete" @click="macroStore.deleteMacro(macro)">删除</el-button>
-              <el-button :icon="CopyDocument" size="small" class="export" @click="macroStore.exportWaymarksJson(macro)">导出JSON</el-button>
+              <el-button
+                type="success"
+                size="small"
+                :icon="Check"
+                @click="macroStore.submitMacroPlace(macro)"
+              >
+                完成
+              </el-button>
+              <el-button
+                v-if="macro.Deletability"
+                type="danger"
+                size="small"
+                :icon="Delete"
+                @click="macroStore.deleteMacro(macro)"
+              >
+                删除
+              </el-button>
             </el-row>
           </div>
         </el-card>
       </el-space>
-      <el-card v-show="help" class="markdown-body">
-        <README />
-      </el-card>
     </el-main>
-    <div class="menu">
-      <el-button size="small" @click="macroStore.toggleShow()">隐藏页面</el-button>
-      <el-button type="success" size="small" @click="macroStore.newOne('macro')">新增宏</el-button>
-      <el-button type="success" size="small" color="#3375b9" @click="macroStore.newOne('place')">新增标点</el-button>
-      <el-button color="#BA5783" size="small" @click="macroStore.importPPJSON()">导入PP</el-button>
-      <el-button type="warning" size="small" @click="macroStore.resetZone()">恢复本图</el-button>
-      <el-button type="danger" size="small" @click="macroStore.resetAllData()">恢复全部</el-button>
-      <!-- <el-button type="success" size="small" @click="macroStore.updateZone()">数据更新</el-button> -->
-      <el-button size="small" @click="toggleHelp()">查看帮助</el-button>
-      <i class="vxe-icon-arrow-down">菜单</i>
+    <div class="menu" :class="useType">
+      <el-button v-if="useType === 'overlay'" size="small" @click="macroStore.toggleShow()">
+        隐藏页面
+      </el-button>
+      <el-button type="success" size="small" @click="macroStore.newOne('macro')">
+        新增宏
+      </el-button>
+      <el-button
+        type="success"
+        size="small"
+        color="#3375b9"
+        @click="macroStore.newOne('place')"
+      >
+        新增标点
+      </el-button>
+      <el-button color="#BA5783" size="small" @click="macroStore.importPPJSON()">
+        导入PP
+      </el-button>
+      <el-button type="warning" size="small" @click="macroStore.resetZone()">
+        恢复本图
+      </el-button>
+      <el-button type="danger" size="small" @click="macroStore.resetAllData()">
+        恢复全部
+      </el-button>
+      <form v-if="useType === 'overlay'" style="font-size: 12px;background-color: rgba(255, 255,255,0.5)">
+        <el-switch v-model="hideOnStartup" size="small" />默认最小化
+      </form>
+      <i v-if="useType === 'overlay'" class="vxe-icon-arrow-down">菜单</i>
     </div>
   </el-container>
 </template>
+
 <style lang="scss">
 @import "@/css/ffxiv-axis-font-icons.css";
 * {
-  font-family: "FFXIV", "Helvetica Neue", Helvetica, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
+  font-family: "FFXIV", "Helvetica Neue", Helvetica, "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "微软雅黑", Arial, sans-serif;
   pointer-events: initial;
 }
 ::-webkit-scrollbar {
@@ -306,10 +434,11 @@ body {
   width: 100%;
 }
 .elheader {
+  padding-left: 0.25rem;
   .fastEntrance {
     max-height: 0;
     opacity: 0;
-    transition: all 0.25s;
+    transition: all 0.1s;
     width: 100%;
   }
   &:hover {
@@ -320,10 +449,6 @@ body {
   }
 }
 .menu {
-  [class*="vxe-"] {
-    text-align: center;
-    font-size: 14px;
-  }
   background: transparent;
   width: auto;
   height: auto;
@@ -332,22 +457,28 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.1rem;
-  transition: all 0.25s;
+  transition: all 0.1s;
   position: fixed;
   top: 0;
   right: 0;
-  transform: translateY(calc(-100% + 1rem));
-  opacity: 0.5;
-  z-index: 100;
-  &:hover {
-    transform: translateY(0);
-    opacity: 1;
-    [class*="vxe-"] {
-      opacity: 0;
+  &.overlay{
+    transform: translateY(calc(-100% + 1rem));
+    opacity: 0.5;
+    z-index: 100;
+    &:hover {
+      transform: translateY(0);
+      opacity: 1;
+      [class*="vxe-"] {
+        opacity: 0;
+      }
     }
   }
   .el-button {
     margin: 0;
+  }
+  [class*="vxe-"] {
+    text-align: center;
+    font-size: 14px;
   }
 }
 .main-box-card {
@@ -369,7 +500,7 @@ body {
     max-height: 0;
     overflow: hidden;
     opacity: 0.5;
-    transition: all 0.25s ease-in-out;
+    transition: all 0.1s ease-in-out;
   }
   &:hover {
     .buttonArea {
@@ -378,15 +509,16 @@ body {
     }
   }
   .macroText {
+    white-space: pre;
     text-overflow: ellipsis;
     overflow: hidden;
     line-height: 1.5;
   }
-  @media screen and (max-width: 600px) {
-    .macroText {
-      white-space: normal;
-    }
-  }
+  // @media screen and (max-width: 600px) {
+  //   .macroText {
+  //     white-space: normal;
+  //   }
+  // }
 }
 
 .markIcon {
